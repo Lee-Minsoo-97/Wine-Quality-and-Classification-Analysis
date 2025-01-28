@@ -1,0 +1,404 @@
+---
+title: "STA135 Group Project"
+author: "Minsoo Lee, Young Ha Jeong, Sehee Han"
+date: "2023-12-12"
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(kableExtra)
+library(ggplot2)
+library(gridExtra)
+library(corrplot)
+library(Hotelling)
+library(caTools)
+library(MASS)
+library(klaR)
+```
+
+## 1. Abstract
+The study focuses on analyzing a dataset employing multivariate data analysis techniques to uncover underlying patterns and relationships. Principal Component Analysis (PCA) is utilized to reduce dimensionality and highlight significant variables. The analysis aims to differentiate between red and white wines and to predict wine quality based on chemical measurements. The findings reveal distinct chemical profiles between wine types and quality levels, demonstrating the effectiveness of multivariate techniques in wine classification and quality prediction.
+
+
+
+## 2. Introduction
+The chemical composition of wines plays a pivotal role in defining their type and quality. This project aims to unravel these complexities within a dataset of 600 Portuguese wines, each characterized by a set of 13 diverse variables. The study is propelled by the ambition to discern the distinctive chemical attributes that separate red and white wines and to assess the elements that denote their quality. To achieve this, we will employ a suite of multivariate statistical techniques, encompassing Principal Component Analysis (PCA) for reducing the dimensionality of our data, Hotelling's T-test for contrasting the chemical profiles of red and white wines, and logistic regression for predictive analysis. This comprehensive approach is designed to illuminate the underlying patterns within the wine dataset, offering a nuanced understanding of the variables that are most influential in wine classification.
+
+
+
+## 3. Explanatory Data Analysis
+The given data-set, "wine.csv" contains 600 different randomly sampled Portuguese wines with each wine has 13 variables:
+
+- **Fixed acidity** (g(tartaric acid)/dm3), **Volatile acidity** (g(acetic acid)/dm3), **Citric acid** (g/dm3)
+- **Residual sugar** (g/dm3), <br>
+- **Chlorides** (g(sodium chloride)/dm3)
+- **Free sulfur dioxide** (mg/dm3), **Total sulfur dioxide** (mg/dm3)
+- **Density** (g/cm3), **pH**,<br>
+- **Sulphates** (g(potassium sulphate)/dm3)
+- **Alcohol** (vol.%)
+- **Quality**: measured by the median of 3 different assessors' evaluations on the scale of 0 to 10)
+- **Red** (indicator: 1 if red, 0 if white)
+
+```{r include=FALSE}
+#Data
+wine = read.csv('wine.csv')
+sapply(wine, class)
+
+wine$quality = factor(wine$quality, order=TRUE)
+wine$red = factor(wine$red)
+
+sum(is.na(wine)) # no missing data
+```
+```{r}
+table(wine$red) # check if data is balanced
+table(wine$quality)
+```
+
+Considering the earlier definition of the data set, where "quality" and "red" are grouping variables categorizing wine, and the remaining variables are numeric continuous variables, the class of data set is transformed accordingly and no existence of missing values is confirmed. Whether the data is balanced is also confirmed with the first and second table of wine above.
+
+```{r echo=FALSE, eval=TRUE, results=TRUE}
+summary1 = sapply(wine[,1:6], summary) # compute univariate statistics
+summary2 = sapply(wine[,7:11], summary)
+as.data.frame(summary1) %>% kbl() %>% kable_styling()
+as.data.frame(summary2) %>% kbl() %>% kable_styling()
+```
+
+When summary statistics are examined, it is evident that each variable has a different scale, mean, and distribution in the data. Even for the same attribute such as acidity, the median for fixed acidity is 7.2, while for volatile acidity, it is 0.34. Additionally, the values for total sulfur dioxide exhibit a wide range from 7 to 240, indicating greater variation compared to other variables. This highlights the need for data standardization in future data analysis.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE}
+# pairwise scatter plots
+pairs(wine[,1:11])
+```
+
+Given the pairwise scatter plots, positive correlations between density and acidity, as well as negative correlations between pH and acid, sugar, and alcohol, are observed. The specific variables with high or low correlations will be investigated more thoroughly in future analyses.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+# boxplots by group
+# boxplot of each variable by red
+name_vars = names(wine)[sapply(wine, is.numeric)]
+
+plots = list()
+for (var in name_vars) {
+  p = ggplot(wine, aes_string(x = "red", y = var)) +
+    geom_boxplot()
+  plots[[var]] = p
+}
+
+grid.arrange(grobs=plots, ncol=3)
+```
+
+Nextly, boxplots are created for each numeric variable, grouped by whether it's red or white wines. Although outliers are observed in all variables, the number is not significant enough to consider removing it. Generally, noticeable differences in means and distributions between white and red wines are observed across all variables. Therefore, it is anticipated that predicting whether a wine is red or white could be reasonably achievable by knowing the values of these numeric variables.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+# boxplot of each variable by quality
+plots = list()
+for (var in name_vars) {
+  p = ggplot(wine, aes_string(x = "quality", y = var)) +
+    geom_boxplot()
+  plots[[var]] = p
+}
+
+grid.arrange(grobs=plots, ncol=3)
+```
+
+When boxplots are drawn grouped by quality, outliers are observed in all variables, but it is negligible. Except for chlorides, free sulfur dioxide, and pH, noticeable differences in means and distributions are observed in all other variables based on the quality group. While the degree of difference is less remarkable than with the `red` variable, it is anticipated that knowing the values of these numeric variables could also reasonably predict the quality of the wine.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE}
+# histogram of each variable by group
+
+
+par(mfrow = c(4,3), mar = c(2, 2, 2, 1))  # Reduce margins
+for (var in name_vars){
+  hist(wine[[var]], xlab = var, main = var)
+}
+
+```
+
+When examining the distribution of explanatory variables through histograms, density, citric acid, and pH exhibit shapes close to a normal distribution, while the remaining variables are generally right-skewed. Further detailed testing will be conducted in the future to assess whether the data satisfies the assumption of normality since we need to assess whether the multivariate normality assumption holds when the variables are analyzed along with each other.
+
+
+## 4. Multivariate Data Analysis
+#### 4.1. Correlation
+```{r}
+par(mfrow=c(1,1))
+corr = round(cor(wine[,1:11]),4)
+corrplot(corr, method="circle", type="lower")
+```
+Upon creating a correlation heatmap, it is shown that variables such as fixed acidity, volatile acidity, residual sugar, chlorides, free sulfur dioxide, and total sulfur dioxide generally exhibit correlations with other variables. Additionally, density shows a strong negative correlation with alcohol.
+
+```{r echo=FALSE, eval=TRUE, results=TRUE, warning=FALSE}
+corr1 = corr[,1:6]
+corr2 = corr[, 7:11]
+
+as.data.frame(corr1) %>% kbl() %>% kable_styling()
+as.data.frame(corr2) %>% kbl() %>% kable_styling()
+```
+
+`total sulfur dioxide` and `free sulfur dioxide` shows the strongest positive correlation with 0.7665 and `total sulfur dioxide` and indicator `red` has the strongest negative correlation with -0.8117. Also, `Alcohol` and `Sulphates` are the weakest positively correlated with 0.0876 correlation. `Quality` and `pH` has the weakest negatively correlated with correlation -0.0255.
+
+Due to the substantial correlations among variables, conducting PCA and using the principal components seem reasonable.
+
+
+#### 4.2. Principal Component Analysis (PCA)
+Principal Component Analysis (PCA) is a technique for reducing the dimensionality of data that contains highly correlated variables. It explains the variables by creating principal components that are composed of a certain proportion of multiple variables.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+stdWine <- wine
+stdWine[, -c(12,13)] <- scale(stdWine[, -c(12,13)]) # Excluding the indicator 'red' and 'quality'
+
+pca_result1 <- prcomp(wine[,-c(12,13)], center = TRUE, scale = TRUE)
+std_pca_result1 = prcomp(stdWine[, -c(12,13)], center=TRUE, scale=TRUE) # Check if rescaled data work better
+
+par(mfrow=c(1,2))
+plot(pca_result1$sdev^2, 
+     type="b",
+     xlab="Principal component",
+     ylab="Eigenvalue",
+     main="Scree plot,\n unscaled data")
+
+plot(std_pca_result1$sdev^2, 
+     type="b",
+     xlab="Principal component",
+     ylab="Eigenvalue",
+     main="Scree plot,\n standardized data")
+```
+
+Re-scaling variables in PCA can ensure that all variables have equal weight in a more effective sense. However, in this case, the rescaling step is ommited since the rescaling of the data does not lead to significant differences in the results of PCA.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+par(mfrow=c(1,1))
+plot(pca_result1$sdev^2/sum(pca_result1$sdev^2),
+     type="b",
+     xlab="Dimension",
+     ylab="% variation explained",
+     ylim=1.1*c(0, max(pca_result1$sdev^2/sum(pca_result1$sdev^2))))
+```
+
+The plot shows how much of the variation in the data is explained by the number of principal components. It is evident that the steep decline in slope begins from the fourth principal component. However, the exact cumulative proportion of variation needs to be examined.
+
+```{r echo=FALSE, eval=TRUE, results=TRUE, warning=FALSE}
+summary(pca_result1)
+```
+
+Above is the summary table of PCA results. One of the objectives of this analysis is to find principal components that can explain over 80% of the variation. Firstly, Principal Component 1 (PC1) explains the most variation at 31%, followed by 21% explained by PC2 and 15% by PC3. Additionally, looking at the cumulative proportion, selecting PC1 to PC5 explains approximately 82% of the total variation in the data. Therefore, we set the number of principal components to 5.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+## eigenvectors
+e1 = pca_result1$rotation[,1]
+e2 = pca_result1$rotation[,2]
+e3 = pca_result1$rotation[,3]
+
+par(mfrow=c(3,1))
+barplot(e1/pca_result1$sdev[1], main="Loadings for the 1st PC", cex.lab = 0.5, las=2)
+barplot(e2/pca_result1$sdev[2], main="Loadings for the 2nd PC", cex.lab = 0.5, las=2)
+barplot(e3/pca_result1$sdev[3], main="Loadings for the 3rd PC", cex.lab = 0.5, las=2)
+```
+
+PC1, PC2, and PC3, which explain the most variation, were selected to confirm which variables have the most significant impact on each principal component. As it was confirmed from the previous analysis that the proportion of variation explained by PC4 and beyond drops below 7%, it is deemed less meaningful and is therefore excluded.
+
+`total sulfur dioxide` and `free sulfur dioxide` have the most significant impact on PC1. Except for `citric acidity` and `alcohol`, all other variables have a significant influence on PC1. Therefore, the combination of variables that explains the most variation consists of all variables except `citric acid` and `alcohol`. Nextly, `Density` has the most significant impact on PC2, followed by `fixed acidity`, `citric acidity`, `residual sugar`, `alcohol`, `pH`, and others. Variables such as `citric acid` and `alcohol`, which had a low impact in PC1, now have a high impact on PC2. Lastly in PC3, which explains a considerable amount of variation, `Volatile acidity`, `citric acidity`, and `alcohol` have a significant impact. Variables that had low impact in PC1, like sulfur dioxide, density, and chlorides, show varying impacts in PC3.
+
+Since PC1, PC2, and PC3 collectively explain 71%of the variation, a comprehensive view considering all three principal components is essential. It is observed that all variables have a high impact on at least one principal component among these three components. Therefore, to effectively explain the variation in the data, all variables need to be considered.
+
+
+
+#### 4.3. Assessing The Multivariate Normality
+
+In this chapter, the multivariate normality of this data will be assessed. \\
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+# PC5
+X_pca5 = as.data.frame(pca_result1$x[,1:5])
+
+## chi squared q-q plot for multivariate data
+n <- dim(X_pca5)[1]
+p <- dim(X_pca5)[2]
+S <- cov(X_pca5)
+centeredX_pca5 <- scale(X_pca5, scale=FALSE)
+
+par(mfrow=c(1,2))
+theoQ <- qchisq(((1:n)-0.5)/n, p)
+sampQ <- sort(diag(centeredX_pca5%*%solve(S)%*%t(centeredX_pca5)))
+plot(theoQ, sampQ,
+     xlab="Theoretical Quantiles",
+     ylab="Sample Quantiles",
+     main=expression(paste(chi^2," Q-Q Plot of PC5")))
+
+# PC3
+X_pca3 = as.data.frame(pca_result1$x[,1:3])
+
+## chi squared q-q plot for multivariate data
+n <- dim(X_pca3)[1]
+p <- dim(X_pca3)[2]
+S <- cov(X_pca3)
+centeredX_pca3 <- scale(X_pca3, scale=FALSE)
+
+par(mfrow=c(1,1))
+theoQ <- qchisq(((1:n)-0.5)/n, p)
+sampQ <- sort(diag(centeredX_pca3%*%solve(S)%*%t(centeredX_pca3)))
+plot(theoQ, sampQ,
+     xlab="Theoretical Quantiles",
+     ylab="Sample Quantiles",
+     main=expression(paste(chi^2," Q-Q Plot of PC3")))
+
+```
+
+Chi-squared q-q plot of PC5 and PC3 are created to examine if the data in both models follows the multivariate normality. For the data in PC5, the points don't fall approximately along a straight line at all which suggests that the variables don't follow a multivariate normal distribution. On the other hand, for the data of PC3, the points fall exactly onto a straight line which suggests that it holds a multivariate normality assumption of the data.
+
+PC Analysis is also conducted at this stage by plotting PCs to determine if created PCs can distinctly separates factor variables of each `red` and `white`, and the factor measurements of `quality`.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+plot(X_pca5, 
+     col=wine$red)
+```
+
+Above is the generated plot of the combination of respective PCs in PC5 model, setting the color of points based on the `red` variable. This plot shows that the first principal component distinctly separates `red` and `white`.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+plot(X_pca5, 
+     col=wine$quality)
+```
+
+To check whether the PCs effectively differentiate between `quality` groups in PC5 model, as depicted above, it appears that the quality groups are not well distinguished in the plots.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+plot(X_pca3, 
+     col=wine$red)
+```
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+plot(X_pca3, 
+     col=wine$quality)
+```
+Above is the combination of respective PCs in PC3 model, setting the color of points based on the `red` and `quality` respectively. This shows that the `red` groups are still distinguished, but there does not seem to be a clear decision boundary for separating `quality` groups in any cases.
+
+In the process of selecting an appropriate model, the results of explained variance, multivariate normality, and PC analysis were considered. While explained variance supports including PC5, multivariate normality is not upheld. On the other hand, in the PC3 model, multivariate normality holds, but this model only explains about 60% of the variation in the data and the performance in differentiating factor variables appears extremely low.
+
+Given these discrepancies in the analysis, we decided not to decrease the dimension of the data using PCA considering the significance of the accuracy of the future prediction model and the multivariate normality assumption of the models.
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+
+set.seed(123)  
+split <- sample.split(wine$red, SplitRatio = 0.7)
+train <- subset(wine, split == TRUE)
+test <- subset(wine, split == FALSE)
+
+# LDA
+lda_model <- lda(red ~ ., data = train)
+lda_pred <- predict(lda_model, test)$class
+lda_acc <- mean(lda_pred == test$red)
+
+# QDA 
+qda_model <- qda(red ~ ., data = train)
+qda_pred <- predict(qda_model, test)$class
+qda_acc <- mean(qda_pred == test$red)
+
+# logist
+logit_model <- glm(red ~ ., data = train, family = "binomial")
+logit_pred <- predict(logit_model, test, type = "response") > 0.5
+logit_acc <- mean(logit_pred == test$red)
+
+# comparing perfomrmance
+performance <- data.frame(LDA = lda_acc, QDA = qda_acc, Logistic = logit_acc)
+
+```
+
+
+#### 4.4. Hotelling T test
+Hotelling's T-test is ideal for directly comparing the mean vectors of the two wine types (`red` and `white`). This approach is conducted because it is more focused and has simplicity compared to MANOVA. Hotelling's T-test is conducted to our given data sets.
+
+-   Using all original data
+```{r echo=FALSE, eval=TRUE, results=T, warning=FALSE}
+#Using all components
+wine_scaled <- wine
+wine_scaled[,1:11] <- scale(wine[,1:11])
+red_wines = wine_scaled[wine_scaled$red == "1",-c(13)]
+white_wines = wine_scaled[wine_scaled$red == "0",-c(13)]
+hotelling_test_result <- hotelling.test(red_wines[,1:11], white_wines[,1:11])
+hotelling_test_result
+```
+Hotelling $T^2$ test using the scaled data, shows the result of P-value 0 due to extremely large $T^2$ statistics. Given these results, it seems that there are significant differences in the mean vectors of the continuous variables between red and white wines. The very low p-value suggests that these differences are not due to random chance.
+
+## 5. Simulation or Prediction
+
+```{r echo=FALSE, eval=TRUE, results=FALSE, warning=FALSE}
+# Assuming X is the predictor matrix and Y is the response variable for the wine dataset
+X <- wine[,1:11]
+Y <- as.numeric(wine[,13] == "1") # 1 for red, 0 for white
+
+# Plotting
+plot(X, col=Y+1)
+
+# LDA Fit
+ldaFit <- lda(X, Y)
+print(ldaFit)
+
+# Prediction
+prd <- predict(ldaFit, X)
+
+# Histograms of discriminant values by group
+ldahist(data = prd$x, g = Y)
+
+# Table of results
+tab <- table(Predicted = prd$class, Actual = Y)
+misclassification_rate <- 1-sum(diag(tab))/sum(tab)
+print(misclassification_rate)
+
+
+
+
+
+```
+
+According to the results above,this shows how each predictor (like `fixed.acidity`) contributes to distinguishing between red and white wines. Larger coefficients indicate greater importance. 
+The histograms visually represent the model's ability to separate red and white wines. Better separation implies more effective discrimination.
+Misclassification rate, calculated from the confusion matrix (`tab`), quantifies the model's accuracy. A lower rate indicates better model performance.
+These plots show the separation between wine types based on pairs of variables, providing insights into which variables are most effective for classification.
+
+```{r}
+# Remove 'red' from the dataset since it's constant
+red_wine <- subset(red_wine, select = -red)
+white_wine <- subset(white_wine, select = -red)
+
+# Logistic regression model for red wine
+red_model <- glm(high_quality ~ . - quality, family = binomial, data = red_wine)
+
+# Logistic regression model for white wine
+white_model <- glm(high_quality ~ . - quality, family = binomial, data = white_wine)
+
+# Summaries of the models
+summary(red_model)
+summary(white_model)
+
+```
+
+Interpretation of red and white wine based on the quality level. 
+The logistic regression model for red wine showed that several chemical properties significantly contributed to predicting wine quality.The fixed acidity has positive correlation with high quality that the higher levels of fixed acidity increase the odds of the wine being classified as high quality. Volative acidity, however, has negative correlation. Higher volatile acidity decreases the likelihood of the wine being high quality. The alochol percentage in red wine has strong positive correlation. Higher alcohol levels significantly increase the chances of the wine being high quality.Sulphates also showed a moderate positive effect on wine quality. The model demonstrated a good fit with an acceptable AUC value, suggesting it can reasonably distinguish between high and low-quality red wines.
+
+The model for white wine also identified key variables influencing quality. Unlike in red wine, residual sugar in white wine showed a positive association with high quality. There is no significant effect on the quality was observed, contrary to expectations.
+Chloride have negative correlation with quality that lower chloride levels are associated with higher quality in white wines.
+Consistent with the red wine model, higher alcohol levels in white wine are associated with higher quality.
+The model's accuracy and AUC were satisfactory, indicating effective predictive capability for white wine quality.
+
+
+## 6. Discussion
+In this study, we explored a dataset of 600 Portuguese wines using various multivariate statistical techniques. The PCA analysis, while insightful in reducing dimensionality, presented a dilemma between preserving multivariate normality and capturing a substantial proportion of variance in the data. The decision not to reduce dimensions using PCA was grounded in the need for accuracy in future prediction models and adherence to the multivariate normality assumption.
+
+Our findings from the Hotelling's T-test revealed significant differences in the mean vectors of continuous variables between red and white wines, suggesting that these two categories are chemically distinct. This distinction is not just statistically significant but also holds practical implications for the wine industry, particularly in areas like quality control and product differentiation.
+
+## 7. Conclusion
+This research contributes to the broader understanding of wine classification through chemical properties. The significant differences identified between red and white wines provide a foundation for further exploration into specific chemical markers that define wine types. Our analysis underscores the potential of multivariate statistical techniques in not only classifying wines but also in predicting their quality.
+
+Future research could expand on this work by incorporating a wider range of variables, including perhaps sensory data or more detailed chemical analyses, to refine the predictive models further. Additionally, exploring other machine learning approaches might offer new insights into the complex interplay of factors that determine wine type and quality.
+
+## Appendix: All code for this report
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+
+```
